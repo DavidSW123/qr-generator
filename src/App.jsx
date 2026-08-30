@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import QRCode from 'qrcode'
 import html2canvas from 'html2canvas'
+import { jsPDF } from 'jspdf'
 import './App.css'
 
 export default function App() {
@@ -10,12 +11,26 @@ export default function App() {
   const [size, setSize] = useState(300)
   const [logo, setLogo] = useState(null)
   const [history, setHistory] = useState([])
+  const [stats, setStats] = useState({ total: 0, today: 0 })
+  const [shareUrl, setShareUrl] = useState('')
   const qrRef = useRef()
   const canvasRef = useRef()
 
   useEffect(() => {
     generateQRCode()
+    loadStats()
   }, [qrValue, qrColor, bgColor, size])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.has('data')) {
+      const data = JSON.parse(atob(params.get('data')))
+      setQrValue(data.value || 'https://example.com')
+      setQrColor(data.color || '#000000')
+      setBgColor(data.bgColor || '#ffffff')
+      setSize(data.size || 300)
+    }
+  }, [])
 
   const generateQRCode = async () => {
     if (!canvasRef.current || !qrValue.trim()) return
@@ -41,23 +56,67 @@ export default function App() {
         { id: Date.now(), value: qrValue, color: qrColor, bgColor, size, logo },
         ...history.slice(0, 9)
       ])
+      updateStats()
     }
   }
 
-  const downloadQR = async () => {
+  const downloadQR = async (format = 'png') => {
     if (!qrRef.current) return
     try {
       const canvas = await html2canvas(qrRef.current, {
         backgroundColor: bgColor,
         scale: 2
       })
-      const link = document.createElement('a')
-      link.href = canvas.toDataURL('image/png')
-      link.download = `qr-code-${Date.now()}.png`
-      link.click()
+
+      if (format === 'png') {
+        const link = document.createElement('a')
+        link.href = canvas.toDataURL('image/png')
+        link.download = `qr-code-${Date.now()}.png`
+        link.click()
+      } else if (format === 'pdf') {
+        const imgData = canvas.toDataURL('image/png')
+        const pdf = new jsPDF('p', 'mm', 'a4')
+        pdf.addImage(imgData, 'PNG', 10, 10, 190, 190)
+        pdf.save(`qr-code-${Date.now()}.pdf`)
+      }
     } catch (err) {
       console.error('Error downloading QR:', err)
     }
+  }
+
+  const generateShareUrl = () => {
+    const data = { value: qrValue, color: qrColor, bgColor, size }
+    const encoded = btoa(JSON.stringify(data))
+    const url = `${window.location.origin}?data=${encoded}`
+    setShareUrl(url)
+  }
+
+  const copyShareUrl = () => {
+    navigator.clipboard.writeText(shareUrl)
+    alert('URL copiada al portapapeles')
+  }
+
+  const loadStats = () => {
+    const stored = localStorage.getItem('qr-stats') || '{"total":0,"today":0}'
+    const data = JSON.parse(stored)
+    const today = new Date().toDateString()
+    const lastDate = localStorage.getItem('qr-stats-date')
+
+    if (lastDate !== today) {
+      data.today = 0
+      localStorage.setItem('qr-stats-date', today)
+    }
+
+    setStats(data)
+  }
+
+  const updateStats = () => {
+    const newStats = {
+      total: stats.total + 1,
+      today: stats.today + 1
+    }
+    setStats(newStats)
+    localStorage.setItem('qr-stats', JSON.stringify(newStats))
   }
 
   const handleLogoUpload = (e) => {
@@ -88,6 +147,10 @@ export default function App() {
       <header className="header">
         <h1>🎯 QR Code Generator</h1>
         <p>Crea códigos QR profesionales y personalizados</p>
+        <div className="stats-bar">
+          <span>📊 Total: {stats.total}</span>
+          <span>📅 Hoy: {stats.today}</span>
+        </div>
       </header>
 
       <div className="container">
@@ -162,10 +225,28 @@ export default function App() {
               <button className="btn btn-primary" onClick={addToHistory}>
                 ✓ Generar QR
               </button>
-              <button className="btn btn-success" onClick={downloadQR}>
-                ⬇ Descargar
+              <button className="btn btn-success" onClick={() => downloadQR('png')}>
+                🖼 PNG
+              </button>
+              <button className="btn btn-success" onClick={() => downloadQR('pdf')}>
+                📄 PDF
+              </button>
+              <button className="btn btn-info" onClick={generateShareUrl}>
+                🔗 Compartir
               </button>
             </div>
+
+            {shareUrl && (
+              <div className="share-section">
+                <p>URL para compartir:</p>
+                <div className="share-url">
+                  <input type="text" readOnly value={shareUrl} />
+                  <button className="btn-copy" onClick={copyShareUrl}>
+                    Copiar
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="preview-section">
